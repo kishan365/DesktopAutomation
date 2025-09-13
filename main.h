@@ -10,10 +10,15 @@ extern "C" {
 		char *hotkeys;
 		int id;
 	}HotkeyRequest;
+	typedef struct  {
+		char singleChar;
+		char *fullString;
+	}Delimiter;
 
-	int RegisterHotKey_user(char *hotkeys, int actionID);
+	int RegisterHotKey_user(char *hotkeys);
+
 	
-
+	Delimiter d;
 #ifdef __cplusplus
 }
 #endif
