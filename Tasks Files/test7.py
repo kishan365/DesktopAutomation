@@ -1,1 +1,0 @@
-print("hello 7 from python File\n")
