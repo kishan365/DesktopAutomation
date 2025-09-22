@@ -1,0 +1,4 @@
+1, C:\Users\kishan sah\source\repos\Desktop Automation\Tasks Files\test7.py, ALT+A
+ 2, C:\Users\kishan sah\source\repos\Desktop Automation\Tasks Files\test7.py, ALT+D
+ 3, C:\Users\kishan sah\source\repos\Desktop Automation\Tasks Files\test7.py, ALT+F
+ 

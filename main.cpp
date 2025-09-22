@@ -1,121 +1,85 @@
 ﻿#define _CRT_SECURE_NO_WARNINGS  
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>   // optional, useful for modern socket API
 
-#pragma comment(lib, "Ws2_32.lib") // link winsock lib
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 #include <conio.h>
 #include <stdlib.h>
-#include <shellapi.h>   // for ShellExecute
 #include "main.h"
-static int HotKey_ID;
 
-#define MAX_HISTORY 10     // Maximum number of clipboard entries to store
-#define BUFFER_SIZE 200    // Maximum size of each clipboard entry
+/*================DEFINE=====================================================*/
 #define MAX_TASK_NUMBER 20 // Maximum number of tasks allowed
 
 typedef void (*FuncPtr)(const char*);
-
+/*===============================STRUCTURE===================================*/
 typedef struct {
     int id;
     char *filePath;
     FuncPtr func;
+    char *hotkey;
 }Task;
-
+/*===============================GLOBAL VARIABLES=============================*/
 static Task *task = NULL;
 static int taskCount;
-bool textOverflow = false;
 DWORD mainThreadID;
 DWORD pipeThreadID;
 HANDLE hPipe;
 char directory[100] = "C:\\Users\\kishan sah\\source\\repos\\Desktop Automation\\Tasks Files";
-
+const char *file = "text.txt";
+/*=================================ENUMs=======================================*/
 enum Task_Action {
     Task_Action_Invalid,
     Task_Action_Add,
     Task_Action_Edit,
     Task_Action_Delete,
 };
-
 enum HotKey_Action {
     HotKey_Action_Invalid,
     HotKey_Action_Add,
     HotKey_Action_Edit,
     HotKey_Action_Delete,
 };
-
-enum TaskName {
-    Task_Undefined,
-    Task_Clipboard,
-    Task_OpenHelloFolder,
-    Task_OpenLinFolder,
-    Task_KairanMail,
-};
-
-
-
-
+/*=======================================TASK REGISTER FUNCTION=========================================*/
 void OpenProgram(const char *path) {
     char command[512];
     snprintf(command, sizeof(command), "\"%s\"", path);  // wrap path in quotes
     system(command);
 }
-
-void OpenGrep() {
-    char path[200];
-    char fileName[] = "追加ラベル検索.bat";
-    char new_path[300];
-    char command[512];
-
-    // Step 1: Ask user for destination folder path
-    printf("Enter the destination folder path (e.g., C:\\Backup):\n");
-
-    // Use scanf_s to safely read the path
-    scanf_s("%s", path, (unsigned)_countof(path));
-
-    // Step 2: Open the original .bat file in Notepad for editing
-    system("notepad \"C:\\Users\\71163572\\Desktop\\personal\\TEJYUN\\GrepKensa\\追加ラベル検索.bat\"");
-
-    // Step 3: Create new full destination path
-    sprintf_s(new_path, sizeof(new_path), "%s\\%s", path, fileName);
-
-    // Step 4: Copy the file to the new path
-    sprintf_s(command, sizeof(command),
-        "copy \"C:\\Users\\71163572\\Desktop\\personal\\TEJYUN\\GrepKensa\\追加ラベル検索.bat\" \"%s\"", new_path);
-    system(command);
-
-    // Step 5: Execute the copied .bat file
-    sprintf_s(command, sizeof(command), "\"%s\"", new_path);
-    // system(command); // Uncomment if you want it to run
+/*========================================HELPER FUNCTIONS========================================*/
+char *allocateMemory(int size) {
+    char *var = (char *)malloc(size + 1);
+    if (!var) {
+        return 0;
+    }
+    memset(var, 0, size + 1);
+    return var;
 }
-
-void GetClipboardText(char *buffer, size_t bufferSize) {
-    if (!OpenClipboard(NULL)) {
-        strcpy_s(buffer, bufferSize, "");
-        return;
+char *removeWhitespace(char *text) {
+    char *newString = (char *)malloc(strlen(text) + 1);
+    if (newString == NULL) {
+        return 0;
     }
-    HANDLE hData = GetClipboardData(CF_TEXT);
-    if (hData == NULL) {
-        CloseClipboard();
-        strcpy_s(buffer, bufferSize, "");
-        return;
+    memset(newString, 0, strlen(text) + 1);
+    for (int iter = 0, i = 0; iter < strlen(text); iter++) {
+        if (text[iter] == ' ') {
+            continue;
+        }
+        newString[i] = text[iter];
+        i++;
     }
-    char *pszText = (char *)GlobalLock(hData);
-    if (pszText == NULL) {
-        CloseClipboard();
-        strcpy_s(buffer, bufferSize, "");
-        return;
-    }
-    strncpy_s(buffer, bufferSize, pszText, bufferSize - 1);
-    GlobalUnlock(hData);
-    CloseClipboard();
+    return newString;
 }
 int strtoInt(char *str) {
     int num = 0;
+    if (strlen(str) <= 0) {
+        return 0;
+    }
+    for (int iter = 0; iter < strlen(str); iter++) {
+        if (str[iter] < '0' or str[iter]>'9') {
+            printf("Non-Numerical value is present in the string\n");
+            return 0;
+        }
+    }
     for (int iter = 0; str[iter] != 0; iter++) {
         num = num * iter * 10;
         num = num + str[iter] - '0';
@@ -123,9 +87,7 @@ int strtoInt(char *str) {
     return num;
 }
 char* toUpperString(char *string) {
-    char *upper = (char *)malloc(strlen(string)+1);
-    if (!upper) { return 0; }
-    memset(upper, 0, strlen(string)+1);
+    char *upper = allocateMemory(strlen(string));
     for (int iter = 0; string[iter] != 0; iter++) {
         if (string[iter] < 'A' || string[iter]>'z') {
             printf("Invalid character present in the string\n");
@@ -135,7 +97,6 @@ char* toUpperString(char *string) {
         upper[iter] = string[iter] - 'a' >= 0 ? string[iter] - 32 : string[iter];
     }
     return upper;
-    
 }
 char toUpperChar(char c) {
     if (c < 'A' || c>'z') {
@@ -143,7 +104,6 @@ char toUpperChar(char c) {
     }
     return c - 'a' >= 0 ? c - 32 : c;
 }
-
 Delimiter getDelimitedWord(char *hotkeys, char delimiter,bool fulltext ) {
     d = { 0 };
     d.fullString = (char *)malloc(strlen(hotkeys)+1);
@@ -190,80 +150,40 @@ Delimiter getDelimitedWord(char *hotkeys, char delimiter,bool fulltext ) {
     }
     return d;
 }
-/*============PATTERN====================*/
-/*
-Add; add=ALT+A/2
-Edit: edit=ALT+A/2(old),ALT+B/2(new)== Here the hotkeys only should be edited not the task assigned.
-Delete: delete=ALT+A/2
-
-
-*/
-
-/*=======================================*/
-void parseEdit(char *hotkeys) {
-    int iter = 0;
-    char *buf_hotkeys=(char*)malloc(strlen(hotkeys)+1);
-    if (!buf_hotkeys) { return; }
-    memset(buf_hotkeys, 0, strlen(hotkeys)+1);
-    buf_hotkeys = toUpperString(hotkeys);
-    char taskId[2];
-    taskId[0] = getDelimitedWord(hotkeys, '/', false).singleChar;
-    taskId[1] = 0;
-    int Id = strtoInt(taskId);
-    UnregisterHotKey(NULL, Id);
-    char *new_hotkey = getDelimitedWord(hotkeys, ',', true).fullString;
-    RegisterHotKey_user(new_hotkey);
+int generateUniqueID() {
+    int id = 1;
+    bool found = false;
+    for (int iter = 0; iter < MAX_TASK_NUMBER; iter++) {
+        if (task[iter].id == id) {
+            found = true;
+        }
+        if (found == true) {
+            id++;
+            found = false;
+            iter = -1;
+        }
+    }
+    return id;
 }
-void ParseDelete(char *hotkeys) {
-    char taskId[2];
-    taskId[0] = getDelimitedWord(hotkeys, '/', false).singleChar;
-    taskId[1] = 0;
-    int Id = strtoInt(taskId);
-    UnregisterHotKey(NULL, Id);
+HotKey_Action parsePipeHotkey(char *message) {
+    if (!strncmp(message, "add", 3))
+        return HotKey_Action_Add;
+    if (!strncmp(message, "edit", 4))
+        return HotKey_Action_Edit;
+    if (!strncmp(message, "delete", 6))
+        return HotKey_Action_Delete;
+    return HotKey_Action_Invalid;
 }
-
-int RegisterHotKey_user(char *hotkeys) {
-    int winKey;
-    char *actionID = (char *)malloc(2);
-    if (!actionID) { return 0; }
-    actionID[0] = getDelimitedWord(hotkeys, '/',false).singleChar;
-    actionID[1] = 0;
-    int ID = strtoInt((char *)actionID);
-    if (ID == 0) {
-        printf("ID=0 is not allowed\n");
-        return 0;
-    }
-    hotkeys = getDelimitedWord(hotkeys, '=', true).fullString;
-    
-    if (!strncmp(hotkeys, "ALT", 3)) {
-        winKey = MOD_ALT;
-    }
-    else  if (!strncmp(hotkeys, "CTRL", 4)) {
-        winKey = MOD_CONTROL;
-    }
-    else if (!strncmp(hotkeys, "SHIFT", 5)) {
-        winKey = MOD_SHIFT;
-    }
-    else {
-        printf("HotKeys not matched\n");
-        return 0;
-    }
-   
-    char hotkey = getDelimitedWord(hotkeys, '+',false).singleChar;
-    if (!hotkey) {
-        return 0;
-    }
-    if (!RegisterHotKey(NULL, ID, winKey, (unsigned char)hotkey)) {
-        printf("Failed to register %s hotkey\n",hotkeys); 
-        return 0; 
-    }
-    // if (!RegisterHotKey(NULL, ID, winKey, 'B')) {
-
-   //if (!RegisterHotKey(NULL, 1, MOD_ALT, 'A')) { printf("Failed to register Alt+A hotkey\n"); return 1; }
-    free(hotkeys);
-    return 1;
+Task_Action parsePipeTask(char *message) {
+    if (!strncmp(message, "AddTask", 7))
+        return Task_Action_Add;
+    if (!strncmp(message, "EditTask", 8))
+        return Task_Action_Edit;
+    if (!strncmp(message, "DeleteTask", 10))
+        return Task_Action_Delete;
+    return Task_Action_Invalid;
 }
-
+/*============================DIFFERENT THREAD FUNCTION======================================*/
 DWORD WINAPI CreateNamedPipe(LPVOID lpParameter) {
     pipeThreadID = GetCurrentThreadId();
     hPipe = CreateNamedPipe(
@@ -275,11 +195,11 @@ DWORD WINAPI CreateNamedPipe(LPVOID lpParameter) {
         128,
         0,
         NULL
-	);
-    if(hPipe == INVALID_HANDLE_VALUE) {
+    );
+    if (hPipe == INVALID_HANDLE_VALUE) {
         printf("Error creating named pipe: %lu\n", GetLastError());
         return 0;
-	}
+    }
     printf("Waiting for client....\n");
     BOOL connected = ConnectNamedPipe(hPipe, NULL);
     if (!connected) {
@@ -291,8 +211,7 @@ DWORD WINAPI CreateNamedPipe(LPVOID lpParameter) {
     printf("Client Connected....\n");
     char buf[256];
     DWORD bytesRead;
-    while(1){
-
+    while (1) {
         BOOL ok = ReadFile(hPipe, buf, (DWORD)sizeof(buf) - 1, &bytesRead, NULL);
         if (!ok) {
             DWORD e = GetLastError();
@@ -306,68 +225,88 @@ DWORD WINAPI CreateNamedPipe(LPVOID lpParameter) {
         }
         if (bytesRead > 0) {
             buf[bytesRead] = '\0';
-            // duplicate buffer to heap and post pointer to main thread
-            char *msgcopy = _strdup(buf);
+            char *msgcopy = allocateMemory(strlen(buf));
+            strcpy(msgcopy, buf);
             if (msgcopy == NULL) {
-                printf("[pipe thread] strdup failed\n");
+                printf("[pipe thread] failed\n");
             }
             else {
-                if (!PostThreadMessage(mainThreadID, WM_APP+100, (WPARAM)msgcopy, 0)) {
+                if (!PostThreadMessage(mainThreadID, WM_APP + 100, (WPARAM)msgcopy, 0)) {
                     printf("[pipe thread] PostThreadMessage failed: %lu\n", GetLastError());
                     free(msgcopy);
                 }
             }
         }
-	}
+    }
 }
-
-
-HotKey_Action parsePipeHotkey(char *message) {
-    if (!strncmp(message, "add", 3))
-        return HotKey_Action_Add;
-    if (!strncmp(message, "edit", 4))
-        return HotKey_Action_Edit;
-    if (!strncmp(message, "delete", 6))
-        return HotKey_Action_Delete;
-    return HotKey_Action_Invalid;
-}
-
-Task_Action parsePipeTask(char *message) {
-    if (!strncmp(message, "AddTask", 7))
-        return Task_Action_Add;
-    if (!strncmp(message, "EditTask", 8))
-        return Task_Action_Edit;
-    if (!strncmp(message, "DeleteTask", 10))
-        return Task_Action_Delete;
-    return Task_Action_Invalid;
-}
-
-TaskName generateIdFromTask(char *task) {
-    TaskName t;
-    if (!strncmp(task, "ClipBoard", 9)) {
-        t = Task_Clipboard;
-    }
-    else if (!strncmp(task, "OpenHello", 9)) {
-        t = Task_OpenHelloFolder;
-    }
-    else if (strncmp(task, "OpenLin", 7)) {
-        t = Task_OpenLinFolder;
-    }
-    else if (strncmp(task, "Kairan", 6)) {
-        t = Task_KairanMail;
-    }
-    else {
-        t = Task_Undefined;
-    }
-    return t;
-}
-static char *getJsonValue(const char *key, char *jsonMsg) {
-    char* value = strstr(jsonMsg, key);
-    char *value2 = (char*)malloc(30);
-    if (!value2) {
+/*========================================HOTKEY CRUD FUNCTIONS========================================*/
+int ParseHotkeyAdd(char *input_hotkeys) {
+    int winKey;
+    char *hotkeys = removeWhitespace(input_hotkeys);
+    char *actionID = (char *)malloc(2);
+    if (!actionID) { return 0; }
+    actionID[0] = getDelimitedWord(hotkeys, '/', false).singleChar;
+    actionID[1] = 0;
+    int ID = strtoInt((char *)actionID);
+    if (ID == 0) {
+        printf("ID=0 is not allowed\n");
         return 0;
     }
-    memset(value2, 0, 30);
+    hotkeys = getDelimitedWord(hotkeys, '=', true).fullString;
+
+    if (!strncmp(hotkeys, "ALT", 3)) {
+        winKey = MOD_ALT;
+    }
+    else  if (!strncmp(hotkeys, "CTRL", 4)) {
+        winKey = MOD_CONTROL;
+    }
+    else if (!strncmp(hotkeys, "SHIFT", 5)) {
+        winKey = MOD_SHIFT;
+    }
+    else {
+        printf("HotKeys not matched\n");
+        return 0;
+    }
+    char hotkey = getDelimitedWord(hotkeys, '+', false).singleChar;
+    if (!hotkey) {
+        return 0;
+    }
+    if (!RegisterHotKey(NULL, ID, winKey, (unsigned char)hotkey)) {
+        printf("Failed to register %s hotkey\n", hotkeys);
+        return 0;
+    }
+    free(hotkeys);
+    return 1;
+}
+void ParseHotkeyEdit(char *hotkeys) {
+    int iter = 0;
+    char *buf_hotkeys=(char*)malloc(strlen(hotkeys)+1);
+    if (!buf_hotkeys) { return; }
+    memset(buf_hotkeys, 0, strlen(hotkeys)+1);
+    buf_hotkeys = toUpperString(hotkeys);
+    char taskId[2];
+    taskId[0] = getDelimitedWord(hotkeys, '/', false).singleChar;
+    taskId[1] = 0;
+    int Id = strtoInt(taskId);
+    UnregisterHotKey(NULL, Id);
+    char *new_hotkey = getDelimitedWord(hotkeys, ',', true).fullString;
+    ParseHotkeyAdd(new_hotkey);
+}
+void ParseHotkeyDelete(char *hotkeys) {
+    char taskId[2];
+    taskId[0] = getDelimitedWord(hotkeys, '/', false).singleChar;
+    taskId[1] = 0;
+    int Id = strtoInt(taskId);
+    UnregisterHotKey(NULL, Id);
+}
+/*========================================TASKS CRUD FUNCTIONS========================================*/
+char *GetTaskJsonValue(const char *key, char *jsonMsg) {
+    char* value = strstr(jsonMsg, key);
+    if (!value) {
+        fprintf(stderr, "Error: The %s was not found inside %s\n", key, jsonMsg);
+        return 0;
+    }
+    char *value2 = allocateMemory(30);
     int iter = 0;
     while (value[iter]!= '\"') {
         iter++;
@@ -386,61 +325,159 @@ static char *getJsonValue(const char *key, char *jsonMsg) {
     }
     return value2;
 }
-void parseTaskJson(char *jsonMessage) {
-    char *hotkey = getJsonValue("hotkey", jsonMessage);
-    char *Id = getJsonValue("id", jsonMessage);
-    const char *fileName = getJsonValue("file", jsonMessage);
-    char *directoryBuff = (char *)malloc(150);
-    if (directoryBuff == NULL) { return; }
-    memset(directoryBuff, 0, 150);
+void WriteTaskToFile() {
+    FILE *fp = fopen(file, "w");
+    if (fp == NULL) {
+        printf("Error opening file!\n");
+        return;
+    }
+    for (int iter = 0; iter < MAX_TASK_NUMBER; iter++) {
+        if (task[iter].id == 0 || task[iter].filePath == NULL || task[iter].hotkey == NULL) {
+            continue;
+        }
+        fprintf(fp, "%d, ", task[iter].id);
+        fprintf(fp, "%s, ", task[iter].filePath);
+        fprintf(fp, "%s\n ", task[iter].hotkey);
+    }
+    fclose(fp);
+}
+void ReloadSavedTask() {
+    FILE *fp = fopen(file, "r");
+    int iter = 0, count = 0, charCount = 0, structIndex = 0;
+    char *hotkey = allocateMemory(50);
+    char *buf = allocateMemory(200);
+    char line[300]; //file format = id,filepath,hotkey
+
+    while (fgets(line, sizeof(line), fp)) { //fgets stops reading when it sees '\n'
+        if (strlen(line) > 0) {
+            while (line[iter] != '\n' && line[iter] != '\0') {
+                while (line[iter] != ',' && line[iter] != '\n' && line[iter] != '\0') {
+                    buf[charCount] = line[iter];
+                    iter++;
+                    charCount++;
+                }
+                if (buf[0] == ' ') {
+                    buf = buf + 1;
+                }
+                if (buf[strlen(buf)] == ' ') {
+                    buf[strlen(buf)] = 0;
+                }
+                structIndex++;
+                switch (structIndex) {
+                case 1:
+                    task[count].id = strtoInt(buf);
+                    break;
+                case 2:
+                    task[count].filePath = allocateMemory(200);
+                    if (strlen(buf) > 0) {
+                        strcpy(task[count].filePath, buf);
+                        taskCount++;
+                    }
+                    break;
+                case 3:
+                    task[count].hotkey = allocateMemory(50);
+                    strcpy(task[count].hotkey, buf);
+                    break;
+                default:
+                    printf("More than 3 items inserted in one line in the database file\n");
+                    break;
+                }
+                iter++;
+                memset(buf, 0, sizeof(*buf) * 200);
+                charCount = 0;
+            }
+            task[count].func = OpenProgram;
+            strcpy(hotkey, task[count].hotkey);
+            hotkey[strlen(task[count].hotkey)] = '/';
+            hotkey[strlen(task[count].hotkey) + 1] = '\0';
+            char taskId[5];
+            sprintf(taskId, "%d", task[count].id);
+            strcat(hotkey, taskId);
+            ParseHotkeyAdd(hotkey);
+            count++;
+        }
+        iter = 0;
+        structIndex = 0;
+    }
+    fclose(fp);
+}
+void AssignTask(int Id,char* hotkey, FuncPtr f,const char *filepath) {
+    //The task should be assigned at the empty place i.e. id = 0
+    int count = 0;
+    for (int iter = 0; iter < MAX_TASK_NUMBER; iter++) {
+        if (task[iter].id == 0) {
+            count = iter;
+            break;
+        }
+    }
+    task[count].id = Id;
+    task[count].hotkey = allocateMemory(strlen(hotkey));
+    strcpy(task[count].hotkey, removeWhitespace(hotkey));
+    task[count].func = f;
+    task[count].filePath = (char *)malloc(sizeof(char) * 150);
+    if (task[count].filePath == NULL) {
+        return;
+    }
+    memset(task[count].filePath, 0, 150);
+    strcpy(task[count].filePath, filepath);
+
+    WriteTaskToFile();
+}
+void ParseTaskJson(char *jsonMessage) {  // Getting hotkey, id, filename from the json message.
+    char *hotkey = GetTaskJsonValue("hotkey", jsonMessage);
+    char *Id = GetTaskJsonValue("id", jsonMessage);
+    const char *fileName = GetTaskJsonValue("file", jsonMessage);
+
+    char *directoryBuff = allocateMemory(150);
     strncpy(directoryBuff, directory, strlen(directory));
     directoryBuff[strlen(directory)] = 0;
     strcat(directoryBuff, "\\");
     const char *filePath = strcat(directoryBuff, fileName);
-    char *hotkeyInfo = (char *)malloc(strlen(hotkey) + strlen(Id) + 3);
-    if (hotkeyInfo == NULL) { return; }
-    memset(hotkeyInfo, 0, strlen(hotkey) + strlen(Id) + 3);
+
+    char *hotkeyInfo = allocateMemory(strlen(hotkey) + strlen(Id) + 3);
     strncpy(hotkeyInfo, hotkey, strlen(hotkey));
     hotkeyInfo[strlen(hotkey)] = '/';
-    strcat(hotkeyInfo, Id);
-
+    char *hotkeyID = allocateMemory(5);
+    int uniqueID = generateUniqueID();
+    sprintf(hotkeyID, "%d", uniqueID);  //changing from string to integer;
+    strcat(hotkeyInfo, hotkeyID);
     
-    task[taskCount].id = strtoInt(Id);
-    task[taskCount].func = OpenProgram;
-    task[taskCount].filePath = (char *)malloc(sizeof(char) * 150);
-    if (task[taskCount].filePath == NULL) {
-        return;
+    AssignTask(uniqueID, hotkey, OpenProgram, filePath);
+    ParseHotkeyAdd(hotkeyInfo);
+}
+bool ParseTaskDelete(char* s) {
+    char *hotkey = allocateMemory(5);
+    int taskID = 0;
+    Delimiter d = getDelimitedWord(s, '=', true);
+    strcpy(hotkey,removeWhitespace(d.fullString));
+    for (int iter = 0; iter < taskCount; iter++) {
+        if (task[iter].id != 0 && !strcmp(task[iter].hotkey,hotkey)) {
+            taskID = task[iter].id;
+            task[iter].id = 0;
+            task[iter].hotkey = NULL;
+            task[iter].func = NULL;
+            task[iter].filePath = NULL;
+            UnregisterHotKey(NULL, taskID);
+            return true;
+        }
     }
-    memset(task[taskCount].filePath, 0, 150);
-    strcpy(task[taskCount].filePath, filePath);
-    RegisterHotKey_user(hotkeyInfo);
-    
-
+    return false;
 }
 
 int main(void) {
     mainThreadID = GetCurrentThreadId();
     CreateThread(NULL, 0, CreateNamedPipe, NULL, 0, NULL);
     task = (Task *)malloc(sizeof(Task) * MAX_TASK_NUMBER);
+    if (!task) {
+        return 0;
+    }
+    memset(task, 0, sizeof(Task) * MAX_TASK_NUMBER);
     char buffer[128];
+    ReloadSavedTask();
     DWORD dwRead = 0;
-    // Prepare variables for loop
-    char clipboardHistory[MAX_HISTORY][BUFFER_SIZE];
-    int historyCount = 0;
-    char previousClipboard[BUFFER_SIZE];
-    GetClipboardText(previousClipboard, BUFFER_SIZE);
 
-    FILE *file = NULL;
-    errno_t errfile;
+    printf("AutoDesk Started......\n");
 
-    printf("Monitoring clipboard... Press Ctrl+Q to EXIT.\n");
-
-    time_t startTime = 0;
-    int iter = 0;
-    bool fsave = FALSE;
-    bool running = FALSE;
-
-    // We'll reuse one OVERLAPPED for reads; recreate/reset per attempt.
     while (1){
         MSG msg;
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -452,132 +489,55 @@ int main(void) {
                         task[iter].func(task[iter].filePath);
                     }
                 }
-                
-                if (msg.wParam == 1) { 
-                    printf("Alt+A pressed.\n"); 
-                    fsave = TRUE; 
-                }
-                if (msg.wParam == 2) { 
-                    printf("Alt+U pressed.\n"); 
-                    system("start \"\" \"C:\\Users\\kishan sah\\source\\repos\\Helloworld\""); 
-                }
-                if (msg.wParam == 3) { 
-                    printf("Alt+L pressed.\n"); 
-                    system(" start C:\\Users\\71163572\\Desktop\\temp\\A_LIN対応"); 
-                }
             }
-            if (msg.message == WM_APP + 100) {
+            if (msg.message == WM_APP + 100){  //Message from frontend(Another Thread)
                 printf("Got NamedPipe Message...\n");
                 char *s = (char *)msg.wParam;
                 if (s) {
-                    printf("[main] Received from pipe: %s\n", s);
-                    // Call the RegisterHotKey_user on main thread — REQUIRED
+                    printf("Received from pipe: %s\n", s);
                     Task_Action Task_Action_type = parsePipeTask(s);
                     if (Task_Action_type == Task_Action_Invalid) {
                         HotKey_Action Action_type = parsePipeHotkey(s);
                         switch (Action_type) {
                         case HotKey_Action_Add:
-                            RegisterHotKey_user(s);
+                            ParseHotkeyAdd(s);
                             break;
                         case HotKey_Action_Edit:
-                            parseEdit(s);
+                            ParseHotkeyEdit(s);
                             break;
                         case HotKey_Action_Delete:
-                            ParseDelete(s);
+                            ParseHotkeyDelete(s);
                             break;
                         default:
                             printf("Todo\n");
                         }
-                        free(s); // free heap copy
+                        free(s);
                     }
                     else {
                         //Handle the hotkey tasks...
-                        
                         switch (Task_Action_type) {
                         case Task_Action_Add:
-                            parseTaskJson(s);
+                            ParseTaskJson(s);
                             taskCount++;
                             break;
                         case Task_Action_Edit:
                             printf("Edit Task Not supported\n");
                             break;
                         case Task_Action_Delete:
-                            printf("Delete Task Not supported\n");
+                           if (ParseTaskDelete(s)) {
+                                taskCount = taskCount > 0 ? (taskCount - 1) : taskCount;
+                           }
                             break;
                         default:
                             printf("Todo\n");
                         }
                         free(s); // free heap copy
                     }
-                    
                 }
-                // do not pass to TranslateMessage/DispatchMessage
             }
         }
-
-        char currentClipboard[BUFFER_SIZE];
-        GetClipboardText(currentClipboard, BUFFER_SIZE);
-
-        if (historyCount >= (MAX_HISTORY - 2)) {
-            printf("Please save the file and start new session\n");
-            Sleep(1000);
-        }
-
-        if (strlen(currentClipboard) > 0 &&
-            strcmp(currentClipboard, previousClipboard) != 0 &&
-            fsave == TRUE)
-        {
-            strcpy_s(previousClipboard, BUFFER_SIZE, currentClipboard);
-            strcpy_s(clipboardHistory[historyCount % MAX_HISTORY], BUFFER_SIZE, currentClipboard);
-            historyCount++;
-            printf("Copied to history: %s\n", currentClipboard);
-            startTime = time(NULL);
-            fsave = FALSE;
-        }
-
-        if (_kbhit()) {
-            char ch = _getch();
-            if (ch == 1) { fsave = TRUE; }  // Ctrl+A
-            if (ch == 81) { printf("Shift+Q pressed.\n"); system("\"C:\\Program Files (x86)\\sakura\\sakura.exe\" C:\\Users\\71163572\\Desktop\\personal\\TEJYUN\\QAC_readMe.txt"); }
-            if (ch == 83) { printf("Shift+S pressed.\n"); OpenProgram("C:\\Users\\71163572\\Desktop\\personal\\personal\\StampCheck.py"); }
-            if (ch == 19 || ch == 17) {
-                printf("\nSaving...\n");
-                errfile = fopen_s(&file, "C:\\Users\\71163572\\Desktop\\personal\\personal\\content_new.txt", "a");
-                if (file != NULL && running == FALSE) { fprintf(file, "\n\n\n"); running = TRUE; }
-                if (file != NULL) {
-                    for (int i = 0; i < historyCount; i++) { fprintf(file, "%s\n", clipboardHistory[i]); }
-                    fclose(file);
-                    printf("File write complete\n");
-                }
-                else {
-                    printf("Error: Unable to open file.\n");
-                }
-                fsave = FALSE;
-            }
-            if (ch == 17) { // Ctrl+Q
-                printf("\nYou pressed Ctrl + Q. Exiting...\n");
-                break;
-            }
-        }
-
-        iter++;
-        if (iter == 3000) {
-            time_t currentTime = time(NULL);
-            printf("\t%d seconds running\n", (int)(currentTime - startTime));
-            printf("Press Ctrl+Q to exit the program\n");
-            iter = 0;
-        }
-
         Sleep(500); // Reduce CPU usage
-    } // end while
-
-    // cleanup
+    }
     CloseHandle(hPipe);
     return 0;
 }
-
-
-/*
-  
-
-*/
